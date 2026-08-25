@@ -46,3 +46,40 @@
 .territory-card.settling{border-style:dashed}
 .settling-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font-size:11px;background:rgba(181,74,74,.18);color:var(--red)}
 .muted-note{margin:8px 0 0;font-size:13px;color:var(--muted)}
+
+/* 可玩性扩展：世道条、姿态标注、委任与开局年景 */
+.world-strip{margin-top:10px}
+.world-strip span{background:rgba(196,150,73,.14);color:var(--gold,#c49649);border:1px solid rgba(196,150,73,.25)}
+.mutator-grid{grid-template-columns:1fr 1fr}
+.mutator-card{cursor:default;opacity:.95}
+.reroll-btn{margin-top:8px;font-size:13px;padding:8px 14px}
+.territory-actions{display:flex;gap:6px;flex-wrap:wrap}
+.territory-actions button{flex:1;min-width:0}
+
+/* 审计修复：克制标记配色、净收芯片、存档区、触控目标与安全区 */
+.t-up,.t-down{font-style:normal;margin-left:4px;font-size:10px}
+.t-up{color:var(--green)}
+.t-down{color:var(--red)}
+.world-strip span{font-size:11px}
+.chip-pos{color:var(--green)!important;border-color:rgba(95,191,130,.35)!important;background:rgba(95,191,130,.08)!important}
+.chip-neg{color:var(--red)!important;border-color:rgba(201,75,75,.4)!important;background:rgba(201,75,75,.1)!important}
+.save-actions{display:flex;gap:10px}
+.save-actions .small-btn{min-height:44px;flex:1;max-width:220px}
+.danger-btn{border-color:rgba(201,75,75,.5)!important;color:var(--red)!important;background:rgba(201,75,75,.08)!important}
+@media(max-width:760px){
+  .topbar{padding-top:calc(10px + env(safe-area-inset-top))}
+  .game-nav{top:calc(70px + env(safe-area-inset-top))}
+  .action-card button,.recruit-card button,.territory-card button,.option-btn,.proposal-btn,.launch-btn{min-height:44px}
+  .end-month-btn{min-height:44px;padding:10px 16px}
+  .tactic-btn{font-size:12px;min-height:42px}
+  .leader-check label{font-size:12px;min-height:42px;display:flex;align-items:center}
+  .target-row{min-height:48px}
+  .stat-chips span,.effect-row span,.tag{font-size:10px}
+  .action-card p,.territory-card p,.recruit-card p,.officer-card p{font-size:12px}
+  .battle-estimate,.form-label{font-size:12px}
+  .story-body,.modal-body{font-size:15px}
+  .option-btn b{font-size:13px}
+  .option-btn span{font-size:11px}
+  .mutator-grid{grid-template-columns:1fr}
+  .log-row p{font-size:12px}
+}
