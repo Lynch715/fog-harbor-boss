@@ -7,8 +7,8 @@ const game=require("../app.js");
 const s=game.createInitialState("沈测试","yi","standard");
 assert.equal(s.name,"沈测试");
 assert.equal(game.ownTerritories(s).length,1);
-assert.equal(Object.keys(s.territories).length,8);
-assert.deepEqual(new Set(game.attackableTerritories(s)),new Set(["south_dock","golden_bay","west_market"]));
+assert.equal(Object.keys(s.territories).length,14,"全图14块地：老街+散户带3+三家各3+中央港区");
+assert.deepEqual(new Set(game.attackableTerritories(s)),new Set(["clocktower","fogvillage","whitesand","south_dock"]),"开局可攻：三块散户地+相邻的南港码头");
 assert.equal(s.ap,3);
 assert.equal(s.crew,42);
 assert.equal(s.regroup,0,"开局没有整补中的人");
@@ -794,3 +794,46 @@ tickT.territories.old_street.settling=2;
 game.tickSettling(tickT,()=>.9);                        // rng=.9 → 不触发街面不服
 assert.equal(tickT.territories.old_street.settling,1,"每月递减1");
 assert.equal(game.settlingTerritories(tickT).length,1);
+
+// ---- 事件池健全性：30+ 事件在"什么都有"的状态下逐个构造，模板串错误在这里先叫 ----
+{
+  const rich=game.createInitialState("沈事件","yi","standard");
+  rich.month=20;rich.cash=100;rich.wins=5;rich.casualties=25;rich.heat=40;rich.wounded=8;
+  ["whitesand","clocktower","fogvillage"].forEach(id=>rich.territories[id].owner="player");
+  rich.incited={faction:"east",until:25};
+  rich.officers.push(...Array.from({length:4},(_,i)=>game.makeCommonCandidate(rich,i)).map(c=>({...c,side:"player"})));
+  for(const e of game.RANDOM_EVENTS){
+    assert.equal(typeof e.id,"string");
+    if(e.condition)e.condition(rich);                       // 条件函数不得抛错
+    const opts=e.options(rich);                             // 选项构造不得抛错
+    assert.ok(Array.isArray(opts)&&opts.length>=1,`事件 ${e.id} 至少要有一个选项`);
+    for(const o of opts)assert.ok(o.text&&typeof o.apply==="function",`事件 ${e.id} 的选项缺 text/apply`);
+  }
+  assert.ok(game.RANDOM_EVENTS.length>=25,`事件池只有 ${game.RANDOM_EVENTS.length} 个，可玩性扩展要求 25+`);
+  for(const [key,build] of Object.entries(game.CHAIN_STEPS)){
+    const d=build(rich);                                    // 链式回响允许返回 null，但不得抛错
+    if(d)assert.ok(Array.isArray(d.options)&&d.options.length>=1,`事件链 ${key} 缺选项`);
+  }
+  console.log(`event pool ok: ${game.RANDOM_EVENTS.length} events, ${Object.keys(game.CHAIN_STEPS).length} chain steps`);
+}
+
+// ---- 排行榜：用时升序，同用时比难度，再比日期；无 localStorage 时安全退化 ----
+{
+  const list=[
+    {runId:"a",months:40,difficulty:"standard",date:"2026-01-02"},
+    {runId:"b",months:18,difficulty:"standard",date:"2026-01-03"},
+    {runId:"c",months:18,difficulty:"brutal",date:"2026-01-04"},
+    {runId:"d",months:18,difficulty:"brutal",date:"2026-01-01"},
+    {runId:"e",months:25,difficulty:"hard",date:"2026-01-05"}
+  ];
+  const sorted=game.sortLeaderboard(list).map(e=>e.runId);
+  assert.deepEqual(sorted,["d","c","b","e","a"],"用时最少在前；同用时死战>标准；同难度先来居前");
+  assert.equal(game.rankOf(list,"d"),1);
+  assert.equal(game.rankOf(list,"a"),5);
+  assert.equal(game.rankOf(list,"没有这局"),null);
+  const won=game.createInitialState("沈榜首","wei","brutal");
+  won.ended=true;won.endingReason="unified";won.month=17;
+  assert.equal(game.recordLeaderboard(won),null,"node 环境无 localStorage：安全返回 null 而不是抛错");
+  assert.deepEqual(game.loadLeaderboard(),[],"无 localStorage 时名录为空数组");
+  console.log("leaderboard tests ok");
+}

@@ -15,7 +15,8 @@ const require=createRequire(import.meta.url);
 const game=require("../app.js");
 
 function seeded(seed){return()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}}
-const MONTH_CAP=90;                                   // 60 个月主战役 + 30 个月加时，超过即判定为打不完
+const TOTAL=Object.keys(game.TERRITORY_DEFS).length; // 14块地：一统需要13场胜仗
+const MONTH_CAP=120;                                  // 60 个月主战役 + 加时，超过即判定为打不完
 const RUNS=24;
 const med=a=>a.length?a.slice().sort((x,y)=>x-y)[Math.floor(a.length/2)]:null;
 
@@ -25,7 +26,7 @@ function topLeaders(s){return s.officers.filter(o=>o.side==="player"&&!o.injured
 function play(seed,difficulty,bar,useSupport){
   const rng=seeded(seed),s=game.createInitialState("测","wei",difficulty);
   let idle=0,battles=0,lostTerr=0;
-  for(let m=0;m<MONTH_CAP&&!s.ended&&game.ownTerritories(s).length<8;m++){
+  for(let m=0;m<MONTH_CAP&&!s.ended&&game.ownTerritories(s).length<TOTAL;m++){
     const owned=game.ownTerritories(s).length;
     while(s.ap>1&&(
       (useSupport&&game.applyAction(s,"garrison"))||
@@ -48,17 +49,17 @@ function play(seed,difficulty,bar,useSupport){
       }
     }
     if(!fought&&s.ap>=1)idle++;else idle=0;
-    if(game.ownTerritories(s).length>=8)break;
-    if(!game.advanceMonth(s,true))break;
+    if(game.ownTerritories(s).length>=TOTAL)break;
+    if(!game.advanceMonth(s,true,rng))break;
     if(game.ownTerritories(s).length<owned)lostTerr+=owned-game.ownTerritories(s).length;
   }
-  return{months:s.month,unified:game.ownTerritories(s).length===8,battles,lostTerr,
+  return{months:s.month,unified:game.ownTerritories(s).length===TOTAL,battles,lostTerr,
     poolsOk:s.crew>=0&&s.regroup>=0&&s.wounded>=0};
 }
 
 function passive(seed){
   const s=game.createInitialState("躺","yi","standard");
-  for(let m=0;m<60&&!s.ended;m++){s.ap=0;game.advanceMonth(s,true)}
+  const prng=seeded(seed);for(let m=0;m<60&&!s.ended;m++){s.ap=0;game.advanceMonth(s,true,prng)}
   return{owned:game.ownTerritories(s).length,wiped:s.ended};
 }
 
@@ -78,19 +79,19 @@ console.log(`躺平·标准   60月后剩余地盘中位 ${med(idle.map(x=>x.own
 const rushMonths=rush.filter(x=>x.unified).map(x=>x.months);
 const steadyMonths=steady.filter(x=>x.unified).map(x=>x.months);
 
-// ① 行动点闸门：一统需 7 场仗（8 块地减去开局的老街），每场 1 行动点、每月 3 点，
-//    且出战会掏空能战人手 ⇒ 每月至多一场 ⇒ 最快第 6 月。这条精确锁死"血拼不消耗行动点"这个根因。
-assert.ok(Math.min(...rushMonths)>=6,`最快通关 ${Math.min(...rushMonths)} 月，行动点闸门失效`);
+// ① 行动点闸门：一统需 13 场仗（14 块地减去开局的老街），每场 1 行动点、每月 3 点，
+//    且出战会掏空能战人手 ⇒ 每月至多一场 ⇒ 最快第 12 月。这条精确锁死"血拼不消耗行动点"这个根因。
+assert.ok(Math.min(...rushMonths)>=12,`最快通关 ${Math.min(...rushMonths)} 月，行动点闸门失效`);
 
 // ② 速通下界：莽夫是接近完美的打法，它都要 12 个月以上，说明滚雪球已经被掐住。
-//    实测中位 18 月；阈值留足余量，只在数值被明显改松时才叫。
-assert.ok(med(rushMonths)>=12,`莽夫中位 ${med(rushMonths)} 月，滚雪球回来了（要求 >=12）`);
+//    实测中位 18~19 月（2026-08 难度上调后）；阈值留余量。
+assert.ok(med(rushMonths)>=16,`莽夫中位 ${med(rushMonths)} 月，滚雪球回来了（要求 >=16）`);
 
-// ③ 正常玩法要撑起战役体量。实测稳健派中位 36 月。
-assert.ok(med(steadyMonths)>=25,`稳健中位 ${med(steadyMonths)} 月，战役太短（要求 >=25）`);
+// ③ 正常玩法要撑起战役体量。实测稳健派中位 52 月：主战役刚好打满，常要进加时。
+assert.ok(med(steadyMonths)>=40,`稳健中位 ${med(steadyMonths)} 月，战役太短（要求 >=40）`);
 
-// ④ 但不能矫枉过正变成打不完。稳健派必须过半能赢。
-assert.ok(steady.filter(x=>x.unified).length>RUNS*.5,`稳健只有 ${steady.filter(x=>x.unified).length}/${RUNS} 通关，难到不可玩`);
+// ④ 但不能矫枉过正变成打不完。稳健派至少要有一半能赢（2026-08 难度上调后实测 54%~70%）。
+assert.ok(steady.filter(x=>x.unified).length>=RUNS*.5,`稳健只有 ${steady.filter(x=>x.unified).length}/${RUNS} 通关，难到不可玩`);
 
 // ⑤ 死战要真的难，不能和标准难度一个手感。
 const brutalWin=rushBrutal.filter(x=>x.unified).length;
