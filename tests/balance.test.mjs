@@ -15,23 +15,29 @@ const require=createRequire(import.meta.url);
 const game=require("../app.js");
 
 function seeded(seed){return()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}}
-const MONTH_CAP=90;                                   // 60 个月主战役 + 30 个月加时，超过即判定为打不完
+const TOTAL=Object.keys(game.TERRITORY_DEFS).length; // 14块地：一统需要13场胜仗
+const MONTH_CAP=120;                                  // 60 个月主战役 + 加时，超过即判定为打不完
 const RUNS=24;
 const med=a=>a.length?a.slice().sort((x,y)=>x-y)[Math.floor(a.length/2)]:null;
 
 function topLeaders(s){return s.officers.filter(o=>o.side==="player"&&!o.injured)
   .sort((a,b)=>(b.stats.force+b.stats.command)-(a.stats.force+a.stats.command)).slice(0,3).map(o=>o.id)}
 
-function play(seed,difficulty,bar,useSupport){
+function play(seed,difficulty,bar,useSupport,useSiege=false){
   const rng=seeded(seed),s=game.createInitialState("测","wei",difficulty);
-  let idle=0,battles=0,lostTerr=0;
-  for(let m=0;m<MONTH_CAP&&!s.ended&&game.ownTerritories(s).length<8;m++){
+  let idle=0,battles=0,lostTerr=0,frozen=0,frozenMax=0,prev="";
+  for(let m=0;m<MONTH_CAP&&!s.ended&&game.ownTerritories(s).length<TOTAL;m++){
     const owned=game.ownTerritories(s).length;
+    // 围困的钱只在打不动的时候花——这正是破口/封锁/策反这套工具的设计用途。
+    // 排在招人之后：抢在招人前面会把机器人锁进「没兵→只能封锁→更没兵」的死循环，那测的是机器人不是游戏。
+    const stuck=useSiege&&idle>=2;
     while(s.ap>1&&(
-      (useSupport&&game.applyAction(s,"garrison"))||
-      (useSupport&&game.applyAction(s,"tend_wounded"))||
-      game.applyAction(s,"recruit_crew")||game.applyAction(s,"train")||
-      game.applyAction(s,"business")||(useSupport&&game.applyAction(s,"fortify"))));
+      (useSupport&&game.applyAction(s,"garrison",rng))||
+      (useSupport&&game.applyAction(s,"tend_wounded",rng))||
+      game.applyAction(s,"recruit_crew",rng)||
+      (stuck&&game.applyAction(s,"blockade",rng))||(stuck&&game.applyAction(s,"turncoat",rng))||
+      game.applyAction(s,"train",rng)||
+      game.applyAction(s,"business",rng)||(useSupport&&game.applyAction(s,"fortify",rng))));
     let fought=false;
     if(s.ap>=1&&s.crew>=10){
       const L=topLeaders(s),troops=Math.max(10,Math.round(s.crew*.9));
@@ -48,24 +54,29 @@ function play(seed,difficulty,bar,useSupport){
       }
     }
     if(!fought&&s.ap>=1)idle++;else idle=0;
-    if(game.ownTerritories(s).length>=8)break;
-    if(!game.advanceMonth(s,true))break;
+    if(game.ownTerritories(s).length>=TOTAL)break;
+    if(!game.advanceMonth(s,true,rng))break;
     if(game.ownTerritories(s).length<owned)lostTerr+=owned-game.ownTerritories(s).length;
+    // 僵局哨兵：玩家与各存活AI的地盘数同时纹丝不动，就是 spec §1 描述的冻结局面。
+    const sig=game.ownTerritories(s).length+"|"+game.aliveAIFactions(s).map(f=>game.factionTerritories(s,f).length).join(",");
+    if(sig===prev)frozen++;else frozen=0;
+    prev=sig;frozenMax=Math.max(frozenMax,frozen);
   }
-  return{months:s.month,unified:game.ownTerritories(s).length===8,battles,lostTerr,
+  return{months:s.month,ended:s.ended,unified:game.ownTerritories(s).length===TOTAL,battles,lostTerr,frozenMax,
     poolsOk:s.crew>=0&&s.regroup>=0&&s.wounded>=0};
 }
 
 function passive(seed){
   const s=game.createInitialState("躺","yi","standard");
-  for(let m=0;m<60&&!s.ended;m++){s.ap=0;game.advanceMonth(s,true)}
+  const prng=seeded(seed);for(let m=0;m<60&&!s.ended;m++){s.ap=0;game.advanceMonth(s,true,prng)}
   return{owned:game.ownTerritories(s).length,wiped:s.ended};
 }
 
-const sweep=(d,bar,sup)=>Array.from({length:RUNS},(_,i)=>play(20260731+i*7919,d,bar,sup));
+const sweep=(d,bar,sup,siege)=>Array.from({length:RUNS},(_,i)=>play(20260731+i*7919,d,bar,sup,siege));
 const rush=sweep("standard",1.28,false);
 const rushBrutal=sweep("brutal",1.28,false);
 const steady=sweep("standard",1.6,true);
+const besieger=sweep("standard",1.6,true,true);
 const idle=Array.from({length:RUNS},(_,i)=>passive(20260731+i*7919));
 
 const stat=(n,r)=>{const u=r.filter(x=>x.unified);
@@ -73,24 +84,25 @@ const stat=(n,r)=>{const u=r.filter(x=>x.unified);
 console.log(stat("莽夫·标准",rush));
 console.log(stat("莽夫·死战",rushBrutal));
 console.log(stat("稳健·标准",steady));
+console.log(stat("稳健·围困",besieger));
 console.log(`躺平·标准   60月后剩余地盘中位 ${med(idle.map(x=>x.owned))}  被灭 ${idle.filter(x=>x.wiped).length}/${RUNS}`);
 
 const rushMonths=rush.filter(x=>x.unified).map(x=>x.months);
 const steadyMonths=steady.filter(x=>x.unified).map(x=>x.months);
 
-// ① 行动点闸门：一统需 7 场仗（8 块地减去开局的老街），每场 1 行动点、每月 3 点，
-//    且出战会掏空能战人手 ⇒ 每月至多一场 ⇒ 最快第 6 月。这条精确锁死"血拼不消耗行动点"这个根因。
-assert.ok(Math.min(...rushMonths)>=6,`最快通关 ${Math.min(...rushMonths)} 月，行动点闸门失效`);
+// ① 行动点闸门：一统需 13 场仗（14 块地减去开局的老街），每场 1 行动点、每月 3 点，
+//    且出战会掏空能战人手 ⇒ 每月至多一场 ⇒ 最快第 12 月。这条精确锁死"血拼不消耗行动点"这个根因。
+assert.ok(Math.min(...rushMonths)>=12,`最快通关 ${Math.min(...rushMonths)} 月，行动点闸门失效`);
 
 // ② 速通下界：莽夫是接近完美的打法，它都要 12 个月以上，说明滚雪球已经被掐住。
-//    实测中位 18 月；阈值留足余量，只在数值被明显改松时才叫。
-assert.ok(med(rushMonths)>=12,`莽夫中位 ${med(rushMonths)} 月，滚雪球回来了（要求 >=12）`);
+//    实测中位 18~19 月（2026-08 难度上调后）；阈值留余量。
+assert.ok(med(rushMonths)>=16,`莽夫中位 ${med(rushMonths)} 月，滚雪球回来了（要求 >=16）`);
 
-// ③ 正常玩法要撑起战役体量。实测稳健派中位 36 月。
-assert.ok(med(steadyMonths)>=25,`稳健中位 ${med(steadyMonths)} 月，战役太短（要求 >=25）`);
+// ③ 正常玩法要撑起战役体量。实测稳健派中位 52 月：主战役刚好打满，常要进加时。
+assert.ok(med(steadyMonths)>=40,`稳健中位 ${med(steadyMonths)} 月，战役太短（要求 >=40）`);
 
-// ④ 但不能矫枉过正变成打不完。稳健派必须过半能赢。
-assert.ok(steady.filter(x=>x.unified).length>RUNS*.5,`稳健只有 ${steady.filter(x=>x.unified).length}/${RUNS} 通关，难到不可玩`);
+// ④ 但不能矫枉过正变成打不完。稳健派至少要有一半能赢（2026-08 难度上调后实测 54%~70%）。
+assert.ok(steady.filter(x=>x.unified).length>=RUNS*.5,`稳健只有 ${steady.filter(x=>x.unified).length}/${RUNS} 通关，难到不可玩`);
 
 // ⑤ 死战要真的难，不能和标准难度一个手感。
 const brutalWin=rushBrutal.filter(x=>x.unified).length;
@@ -104,3 +116,29 @@ assert.ok(med(idle.map(x=>x.owned))<=2,`躺平玩家还剩 ${med(idle.map(x=>x.o
 for(const r of [...rush,...rushBrutal,...steady])assert.ok(r.poolsOk,"出现负数人手池");
 
 console.log("balance tests passed");
+
+// ================= 破局机制（2026-08-31）的平衡收口 =================
+// 加这一组之前，稳健画像有 5/24 局跑到 120 个月仍未终结：敌方驻防 300+ 对玩家攻击天花板 ~250，
+// 双方互相打不动，现金堆到几千万无处可花。下面三条锁住的就是「这种局面不再出现」。
+
+// ⑧ 必然终结：任何一局都要在第 100 月前抵达某个结局（FINAL_MONTH=96 兜底）。
+for(const [name,set] of [["稳健",steady],["稳健·围困",besieger],["莽夫",rush],["莽夫·死战",rushBrutal]]){
+  const stuck=set.filter(r=>!r.ended&&!r.unified);
+  assert.equal(stuck.length,0,`${name} 有 ${stuck.length} 局跑到 ${MONTH_CAP} 月仍未终结，后期又冻住了`);
+  const late=set.filter(r=>r.months>100);
+  assert.equal(late.length,0,`${name} 有 ${late.length} 局拖过 100 月，强制结算没生效`);
+}
+
+// ⑨ 僵局哨兵：地盘数连续 24 个月完全不变即判定为冻结。
+for(const [name,set] of [["稳健",steady],["稳健·围困",besieger],["莽夫·死战",rushBrutal]]){
+  const worst=Math.max(...set.map(r=>r.frozenMax));
+  assert.ok(worst<24,`${name} 出现连续 ${worst} 个月地盘数纹丝不动的冻结局面`);
+}
+
+// ⑩ 破局工具是通路不是送分：稳健派通关率仍要落在一个像样的区间里。
+const steadyWin=steady.filter(x=>x.unified).length,siegeWin=besieger.filter(x=>x.unified).length;
+assert.ok(steadyWin>=RUNS*.4&&steadyWin<=RUNS*.92,`稳健通关 ${steadyWin}/${RUNS}，超出可玩区间`);
+assert.ok(siegeWin>=RUNS*.3,`会用围困的稳健派只通关 ${siegeWin}/${RUNS}，破局工具反而是负收益`);
+
+console.log(`必然终结：全部 ${RUNS*4} 局均在 ${Math.max(...[...steady,...besieger,...rush,...rushBrutal].map(r=>r.months))} 月内结束`);
+console.log("破局机制 balance tests passed");
